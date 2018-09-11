@@ -1,2 +1,2 @@
 # sesh
-SeSH (Segev Shell) - Trying to emulate BaSH for fun (ins: OSTEP)
+SeSH (Segev SHell) - Trying to emulate BaSH for fun (ins: OSTEP)
