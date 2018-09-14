@@ -7,13 +7,14 @@
 
 #define _POSIX_C_SOURCE 200809L // strdup, getline
 
-#include <stdio.h>     // printf, getline
+#include <stdio.h>     // printf, getline, perror
 #include <string.h>    // strtok, strdup
 #include <stdlib.h>    // free
-#include <unistd.h>    // execvp
+#include <unistd.h>    // execvp, chdir
 #include <sys/types.h> // fork, wait
 #include <unistd.h>    // fork
 #include <sys/wait.h>  // wait
+#include <errno.h>
 
 #define MAX_ARGS 256
 #define UNUSED(x) ((void)(x))
@@ -24,13 +25,14 @@ static int ParseInput(char *input, char **parsed);
 static void ExecuteCommand(int argc, char **argv);
 static void FreeStringList(char **list);
 static int WhichCommand(char *string);
-static void ExitCommand(void);
+static void ExitCommand(void *ignored_input);
+static void ChangeDirCommand(void *dir_path);
 
 enum builtin_cdms
 {
     EXIT,
-    /* CD,
-    PATH, */
+    CD,
+    /* PATH, */
     NUM_OF_BUILTIN_CMDS
 };
 
@@ -40,16 +42,16 @@ enum bool
     TRUE
 };
 
-typedef void (*builtin_cmd)(void);
+typedef void (*builtin_cmd)(void *);
 
 int g_exit_flag = TRUE;
 char *path = "/bin";
-char *builtin_cmds[NUM_OF_BUILTIN_CMDS] = {"exit", /* "cd", "path" */};
+char *builtin_cmds[NUM_OF_BUILTIN_CMDS] = {"exit", "cd", /* "path" */};
 builtin_cmd commands[NUM_OF_BUILTIN_CMDS] = 
 {
     ExitCommand,
-    /* 0,
-       0 */
+    ChangeDirCommand,
+    /*  0 */
 };
 
 
@@ -74,7 +76,8 @@ static void RunPrompt(void)
     
     while (g_exit_flag)
     {
-        printf("\033[1;32msesh> \033[0m");
+        char *cwd = getcwd(NULL, 0);
+        printf("\033[1;32msesh:\033[1;34m%s\033[0m> ", cwd);
 
         getline(&line, &line_length, stdin); // TODO - error handling
 
@@ -82,16 +85,18 @@ static void RunPrompt(void)
 
         ExecuteCommand(argc, argv);
 
+        free(cwd);
+        cwd = NULL;
+        
         free(line);
         line = NULL;
+
         FreeStringList(argv);
     }
-
 }
 
 static int ParseInput(char *input, char **parsed)
 {
-    // int argc = CountArguments()
     int i = 1;
     char *curr_arg = NULL;
 
@@ -114,7 +119,7 @@ static void ExecuteCommand(int argc, char **argv)
     
     if (-1 != command_number)
     {
-        commands[command_number]();
+        commands[command_number](argv[1]);
     }
     else /* TODO - check if binary exists in path directories */
     {
@@ -123,6 +128,10 @@ static void ExecuteCommand(int argc, char **argv)
         if (0 == pid)
         {
             execvp(argv[0], argv);
+            
+            /* if reached here, exec failed - no such command exists */
+            fprintf(stderr, "%s: command not found\n", argv[0]);
+            exit(0);
         }
     }
 
@@ -159,7 +168,19 @@ static int WhichCommand(char *string)
     return command;
 }
 
-static void ExitCommand(void)
+static void ExitCommand(void *ignored_input)
 {
+    UNUSED(ignored_input);
+
     g_exit_flag = FALSE;
+}
+
+static void ChangeDirCommand(void *dir_path)
+{
+    int status = chdir((const char *)dir_path);
+
+    if (-1 == status)
+    {
+        fprintf(stderr, "sesh: cd: %s: %s\n", dir_path, strerror(errno));
+    }
 }
