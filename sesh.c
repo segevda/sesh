@@ -7,20 +7,20 @@
 
 #define _POSIX_C_SOURCE 200809L // strdup, getline
 
-#include <stdio.h>     // printf, getline, perror
-#include <string.h>    // strtok, strdup
+#include <stdio.h>     // printf, getline
 #include <stdlib.h>    // free
-#include <unistd.h>    // execvp, chdir
+#include <stddef.h>    // typedef size_t
+#include <unistd.h>    // fork, execvp, chdir, getcwd
 #include <sys/types.h> // fork, wait
-#include <unistd.h>    // fork
 #include <sys/wait.h>  // wait
+#include <string.h>    // strtok, strdup, strerror
 #include <errno.h>
 
 #define MAX_ARGS 256
 #define UNUSED(x) ((void)(x))
 
-// int prompt = 0;
 static void RunPrompt(void);
+static void RunBatch(const char *batch_file);
 static int ParseInput(char *input, char **parsed);
 static void ExecuteCommand(int argc, char **argv);
 static void FreeStringList(char **list);
@@ -41,6 +41,8 @@ enum bool
     FALSE,
     TRUE
 };
+
+#define FAILURE (-1)
 
 typedef void (*builtin_cmd)(void *);
 
@@ -63,6 +65,14 @@ int main(int argc, char const *argv[])
     {
         RunPrompt();
     }
+    else if (2 == argc)
+    {
+        RunBatch(argv[1]);
+    }
+    else
+    {
+        fprintf(stderr, "sesh: Too many arguments\n");
+    }
 
     return 0;
 }
@@ -80,9 +90,7 @@ static void RunPrompt(void)
         printf("\033[1;32msesh:\033[1;34m%s\033[0m> ", cwd);
 
         getline(&line, &line_length, stdin); // TODO - error handling
-
         argc = ParseInput(line, argv);
-
         ExecuteCommand(argc, argv);
 
         free(cwd);
@@ -93,6 +101,33 @@ static void RunPrompt(void)
 
         FreeStringList(argv);
     }
+}
+
+static void RunBatch(const char *batch_file)
+{
+    FILE *fp = fopen(batch_file, "r");
+
+    if (NULL == fp)
+    {
+        fprintf(stderr, "sesh: batch-file error: %s\n", strerror(errno));
+        exit(FAILURE);
+    }
+
+    char *line = NULL;
+    size_t line_length = 0;
+    int argc = 0;
+    char *argv[MAX_ARGS] = {0};
+
+    while (FAILURE != getline(&line, &line_length, fp))
+    {
+        argc = ParseInput(line, argv);
+        ExecuteCommand(argc, argv);
+    }
+
+    free(line);
+    line = NULL;
+
+    FreeStringList(argv);
 }
 
 static int ParseInput(char *input, char **parsed)
@@ -131,7 +166,7 @@ static void ExecuteCommand(int argc, char **argv)
             
             /* if reached here, exec failed - no such command exists */
             fprintf(stderr, "%s: command not found\n", argv[0]);
-            exit(0);
+            exit(FAILURE);
         }
     }
 
@@ -179,7 +214,7 @@ static void ChangeDirCommand(void *dir_path)
 {
     int status = chdir((const char *)dir_path);
 
-    if (-1 == status)
+    if (FAILURE == status)
     {
         fprintf(stderr, "sesh: cd: %s: %s\n", dir_path, strerror(errno));
     }
